@@ -1,4 +1,5 @@
 const fs = require('fs');
+const cloudinary = require('cloudinary').v2;
 
 const { validationResult } = require('express-validator');
 const mongoose = require('mongoose');
@@ -182,12 +183,13 @@ const deletePlace = async (req, res, next) => {
     return next(error);
   }
 
-  const imagePath = place.image;
+  // 1. Grab image URL
+  const imageUrl = place.image;
 
   try {
     const sess = await mongoose.startSession();
     sess.startTransaction();
-    await place.remove({ session: sess });
+    await place.deleteOne({ session: sess });
     place.creator.places.pull(place);
     await place.creator.save({ session: sess });
     await sess.commitTransaction();
@@ -199,9 +201,21 @@ const deletePlace = async (req, res, next) => {
     return next(error);
   }
 
-  fs.unlink(imagePath, err => {
-    console.log(err);
-  });
+  // 2. Delete the asset from Cloudinary
+  if (imageUrl && imageUrl.includes('cloudinary')) {
+    try {
+      // Extracts 'yourplaces_uploads/filename' from URL
+      const splitUrl = imageUrl.split('/');
+      const filenameWithExtension = splitUrl.pop();
+      const folderName = splitUrl.pop();
+      const filename = filenameWithExtension.split('.')[0];
+      const publicId = `${folderName}/${filename}`;
+
+      await cloudinary.uploader.destroy(publicId);
+    } catch (err) {
+      console.log('Error deleting image from Cloudinary:', err);
+    }
+  }
 
   res.status(200).json({ message: 'Deleted place.' });
 };
